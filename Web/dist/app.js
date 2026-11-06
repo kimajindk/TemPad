@@ -60,14 +60,15 @@ let lastFocused = null;
 const main = $('#main'), sheet = $('#sheet'), alertDialog = $('#alert');
 const validSample = sample => sample?.contact !== false && Number.isFinite(sample?.head) && Number.isFinite(sample?.torso);
 
+function sampleIntervalSeconds(){return mode==='fever'?1:5;}
 function inputAt(seconds) {
   let torso;
   if(mode === 'steady') torso = 36.8 + .08*Math.sin(seconds/37);
-  else if(seconds < 10) torso = 36.8;
-  else if(seconds < 30) torso = 36.8 + .6 * (seconds-10)/20;
-  else if(seconds < 60) torso = 37.4 + (seconds-30)/30;
-  else if(seconds < 90) torso = 38.4 + .2*(seconds-60)/30;
-  else torso = 38.5 + .1*Math.cos((seconds-90)/35);
+  else if(seconds < 1) torso = 36.8;
+  else if(seconds < 4) torso = 36.8 + .5*(seconds-1)/3;
+  else if(seconds < 10) torso = 37.3 + .8*(seconds-4)/6;
+  else if(seconds < 16) torso = 38.1 + .5*(seconds-10)/6;
+  else torso = 38.5 + .1*Math.cos((seconds-16)/35);
   return {date:startedAt+seconds*1000,head:Math.round((torso-.2+1e-9)*10)/10,torso:Math.round((torso+1e-9)*10)/10,contact:true};
 }
 function seedHistory() {
@@ -139,8 +140,9 @@ function receive(sample) {
   }
 }
 function tick(){
-  const index=Math.floor((Date.now()-startedAt)/5000);
-  for(let i=lastIndex+1;i<=index;i++) receive(inputAt(i*5));
+  const step=sampleIntervalSeconds();
+  const index=Math.floor((Date.now()-startedAt)/(step*1000));
+  for(let i=lastIndex+1;i<=index;i++) receive(inputAt(i*step));
   if(index!==lastIndex){lastIndex=index;updateReadings();updateSheetData();if(tab==='events')renderEvents();}
   $('#alert-dot').hidden=!events.some(e=>!e.ack&&!e.resolved);
   presentNext();
@@ -197,7 +199,7 @@ function renderSettings(){
   draft={...settings};
   main.innerHTML=`<div class="page-heading"><h1>설정</h1></div><p class="page-subtitle">알림과 모니터링 환경</p>
     <section class="section-card"><h2>${icon('thermometer')}온도 알림</h2><p class="small muted">설정 범위를 벗어나면 바로 알려드려요.</p><p class="settings-note">최근 5분 내 0.5°C 이상 상승해도 알려드려요.</p>${thresholdRow('high','상한 온도')}${thresholdRow('low','하한 온도')}<button class="primary-button" id="save-settings">변경사항 저장</button><p id="settings-error" class="warning-copy" role="status"></p></section>
-    <section class="section-card"><h2>${icon('bell')}화면 알림</h2><p class="small muted">온도 변화가 감지되면 화면 위에서 내려오는 알림으로 알려드려요.</p>${statusLegendHTML()}<div class="rule"></div><dl><div class="definition-row"><dt>온도 단위</dt><dd>섭씨 °C</dd></div><div class="definition-row"><dt>측정 간격</dt><dd>5초</dd></div></dl></section>
+    <section class="section-card"><h2>${icon('bell')}화면 알림</h2><p class="small muted">온도 변화가 감지되면 화면 위에서 내려오는 알림으로 알려드려요.</p>${statusLegendHTML()}<div class="rule"></div><dl><div class="definition-row"><dt>온도 단위</dt><dd>섭씨 °C</dd></div><div class="definition-row"><dt>측정 간격</dt><dd>${sampleIntervalSeconds()}초</dd></div></dl></section>
     <img class="settings-logo" src="./assets/logo.png" alt="TemPad"><p class="settings-version">TemPad</p>`;
   $$('[data-step]',main).forEach(button=>button.onclick=()=>{
     const field=button.dataset.field;
@@ -271,7 +273,7 @@ function renderInlineChart(){
     points=segmentedSamples(samples.filter(s=>s.date>=start&&s.date<=end)).map(s=>({...s,v:chartValue(s)}));
     selection=tracking.selection;chosen=selection===null?null:readingAt(points,selection);
     summaryTitle=chosen?'선택 시각 온도':'측정 없음';value=chosen?.v;
-    caption=selection!==null?`${shortClock(selection)} · ${chosen?'선택한 시각':'측정 없음'}`:validSample(latest)?'5초마다 갱신 · 미측정 구간은 선이 끊겨요':latest.contact===false?'패드에 아기가 없어요':'측정 대기';
+    caption=selection!==null?`${shortClock(selection)} · ${chosen?'선택한 시각':'측정 없음'}`:validSample(latest)?`${sampleIntervalSeconds()}초마다 갱신 · 미측정 구간은 선이 끊겨요`:latest.contact===false?'패드에 아기가 없어요':'측정 대기';
   }
   $('#inline-summary').hidden=!historical&&selection===null;
   $('#inline-summary-title').textContent=summaryTitle;$('#inline-summary-value').textContent=fmt(value);
