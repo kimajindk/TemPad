@@ -112,7 +112,7 @@ function eventTitle(event) {return event.kind==='rise'?'온도 변화를 확인�
 function eventLabel(event) {return ({rise:'빠른 온도 상승',high:'상한 초과',low:'하한 미만',connection:'연결 확인',recovery:'설정 범위 복귀',info:'측정 일시 중지'})[event.kind];}
 function eventDescription(event) {
   if(event.kind==='rise')return `최근 ${fmt(event.reference)} °C에서 ${fmt(event.value)} °C로 올라갔어요. 아기의 상태를 확인해 주세요.`;
-  if(event.kind==='high')return `${fmt(event.value)} °C가 감지되어 설정 상한 ${fmt(event.high)} °C를 넘었어요.`;
+  if(event.kind==='high')return `${fmt(event.value)} °C가 감지되어 설정 상한 ${fmt(event.high)} °C를 넘었어요. 체온계로 아기의 체온을 다시 확인하고, 병원에 방문해 진료받는 것을 권장해요.`;
   if(event.kind==='low')return `${fmt(event.value)} °C가 감지되어 설정 하한 ${fmt(event.low)} °C보다 낮아요.`;
   if(event.kind==='recovery')return `${fmt(event.value)} °C로 설정 범위 안에 돌아왔어요. 온도 흐름을 계속 살펴볼게요.`;
   if(event.kind==='info')return '패드와의 접촉이 없어 측정을 잠시 멈췄어요.';
