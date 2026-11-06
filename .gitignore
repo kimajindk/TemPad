@@ -1,0 +1,8 @@
+output/
+.build/
+.swiftpm/
+**/xcuserdata/
+.DS_Store
+.env
+.env.*
+node_modules/
