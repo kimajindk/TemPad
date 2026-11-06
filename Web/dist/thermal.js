@@ -8,7 +8,7 @@ const position = point => ({x:(point.column+.5)/COLUMNS,y:(point.row+.5)/ROWS});
 const samePoint = (a,b) => a?.column === b?.column && a?.row === b?.row;
 
 export function pointTemperature(point, sample) {
-  if (!sample || !Number.isFinite(sample.head) || !Number.isFinite(sample.torso)) return null;
+  if (!sample || sample.contact === false || !Number.isFinite(sample.head) || !Number.isFinite(sample.torso)) return null;
   if (!point) return Math.max(sample.head,sample.torso);
   if (samePoint(point,DEFAULT_POINTS[0])) return sample.head;
   if (samePoint(point,DEFAULT_POINTS[1])) return sample.torso;
@@ -68,6 +68,10 @@ function installStyles(){
   .tp-thermal-scale{position:absolute;left:16px;top:16px;z-index:2;width:64px;height:4px;border-radius:99px;background:linear-gradient(90deg,#8bdbff,#ffe86a,#ffac3f,#ff5058);pointer-events:none}
   .tp-thermal-sr{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
   .tp-thermal-error{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;font-size:13px;color:#6e6c67}
+  .tp-thermal-empty{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;padding:24px;text-align:center;color:#536b71;pointer-events:none}
+  .tp-thermal-empty[hidden]{display:none}
+  .tp-thermal-empty strong{font-size:15px;font-weight:600;letter-spacing:-.025em}
+  .tp-thermal-empty span{font-size:12px;line-height:1.5}
   `;document.head.append(style);
 }
 
@@ -163,7 +167,10 @@ export function createThermalMonitor(container,{onSelect=()=>{}}={}) {
   imageCanvas.setAttribute('aria-hidden','true');overlay.setAttribute('aria-hidden','true');
   const legend=document.createElement('span');legend.className='tp-thermal-scale';legend.setAttribute('aria-hidden','true');
   const status=document.createElement('span');status.className='tp-thermal-sr';status.setAttribute('aria-live','polite');
-  root.append(imageCanvas,overlay,legend,status);container.append(root);
+  const empty=document.createElement('div');empty.className='tp-thermal-empty';empty.hidden=true;
+  const emptyTitle=document.createElement('strong');emptyTitle.textContent='패드에 아기가 없어요';
+  const emptyHint=document.createElement('span');emptyHint.textContent='아기를 눕히면 측정을 시작해요';empty.append(emptyTitle,emptyHint);
+  root.append(imageCanvas,overlay,legend,status,empty);container.append(root);
   const labels=Array.from({length:2},()=>{
     const element=document.createElement('div');element.className='tp-thermal-label';
     const title=document.createElement('div');title.className='tp-thermal-label-title';
@@ -171,7 +178,9 @@ export function createThermalMonitor(container,{onSelect=()=>{}}={}) {
     const value=document.createElement('div');value.className='tp-thermal-value';title.append(name,led);element.append(title,value);root.append(element);return {element,name,led,value};
   });
   const context=overlay.getContext('2d'),image=new Image(),media=matchMedia('(prefers-reduced-motion: reduce)');
-  let renderer=null,selected=null,sample={head:36.6,torso:36.8},lastSample=performance.now(),disposed=false;
+  let renderer=null,selected=null,sample={head:null,torso:null,contact:true},lastSample=-Infinity,disposed=false;
+  // Neutral image colors are only a rendering fallback; missing readings remain absent in every label.
+  let lastValidSample={head:36.8,torso:37.1},lastMotionTime=0;
   let frame={x:0,y:0,width:0,height:0,containerWidth:0,containerHeight:0,dpr:1};
   let covered=new Set(),projected=[],lastDraw=-Infinity,raf=0,pointer=null;
   const resize=()=>{
@@ -192,6 +201,7 @@ export function createThermalMonitor(container,{onSelect=()=>{}}={}) {
     if(!renderer){
       const replacement=document.createElement('canvas');replacement.setAttribute('aria-hidden','true');imageCanvas.replaceWith(replacement);imageCanvas=replacement;resize();renderer=makeCanvasRenderer(imageCanvas,image);
     }
+    imageCanvas.style.visibility=sample.contact===false?'hidden':'visible';
     root.dataset.ready='true';
   };
   image.onerror=()=>{if(disposed)return;const text=document.createElement('div');text.className='tp-thermal-error';text.textContent='아기 모습을 불러오지 못했어요. 새로고침해 주세요.';root.append(text);};
@@ -199,14 +209,17 @@ export function createThermalMonitor(container,{onSelect=()=>{}}={}) {
   function draw(now){
     if(disposed)return;raf=requestAnimationFrame(draw);
     if(document.hidden||!renderer||!frame.width||!frame.height||now-lastDraw<1000/30)return;lastDraw=now;
-    const time=(now-MOTION_START)/1000,reduced=media.matches;
-    renderer.draw(frame,time,reduced,sample);
+    const contact=sample.contact!==false,valid=pointTemperature(null,sample)!==null;
+    if(contact&&valid)lastMotionTime=(now-MOTION_START)/1000;
+    const time=lastMotionTime,reduced=media.matches;
+    if(!contact)return;
+    renderer.draw(frame,time,reduced,lastValidSample);
     context.setTransform(frame.dpr,0,0,frame.dpr,0,0);context.clearRect(0,0,frame.containerWidth,frame.containerHeight);
     projected=POINTS.map((point,index)=>{
       const p=bodyMotion(position(point),time,reduced),x=frame.x+p.x*frame.width,y=frame.y+p.y*frame.height;
       context.fillStyle=covered.has(index)?'rgba(255,255,255,.94)':'rgba(255,255,255,.55)';context.beginPath();context.arc(x,y,.6,0,Math.PI*2);context.fill();return {point,index,x,y};
     });
-    const tracking=now-lastSample<15000,shown=selected?[selected]:DEFAULT_POINTS;
+    const tracking=valid&&now-lastSample<15000,shown=selected?[selected]:DEFAULT_POINTS;
     for(let i=0;i<2;i++){
       const label=labels[i],point=shown[i];label.element.hidden=!point;if(!point)continue;
       const original=position(point),p=bodyMotion(original,time,reduced),x=frame.x+p.x*frame.width,y=frame.y+p.y*frame.height;
@@ -222,11 +235,12 @@ export function createThermalMonitor(container,{onSelect=()=>{}}={}) {
   function select(point,notify=true){
     if(samePoint(point,selected)||(!point&&!selected))return;
     selected=point?{column:clamp(Math.round(point.column),0,COLUMNS-1),row:clamp(Math.round(point.row),0,ROWS-1)}:null;
-    status.textContent=selected?`선택 지점 ${pointTemperature(selected,sample)?.toFixed(1)}도. 빈 곳을 누르면 기본 추적으로 돌아갑니다.`:'머리와 몸통을 추적합니다.';
+    const value=pointTemperature(selected,sample);
+    status.textContent=sample.contact===false?'패드에 아기가 없어요. 아기를 눕히면 측정을 시작해요.':selected?`선택 지점 ${value===null?'온도 확인 중':value.toFixed(1)+'도'}. 빈 곳을 누르면 기본 추적으로 돌아갑니다.`:'머리와 몸통을 추적합니다.';
     if(notify)onSelect(selected?{...selected}:null);
   }
   function hit(event){
-    if(!projected.length)return null;
+    if(sample.contact===false||!projected.length)return null;
     const bounds=root.getBoundingClientRect(),x=event.clientX-bounds.left,y=event.clientY-bounds.top;
     if(x<frame.x||x>frame.x+frame.width||y<frame.y||y>frame.y+frame.height)return null;
     let nearest=null,distance=Infinity;
@@ -252,7 +266,22 @@ export function createThermalMonitor(container,{onSelect=()=>{}}={}) {
   root.addEventListener('pointerdown',down);root.addEventListener('pointermove',move);root.addEventListener('pointerup',up);root.addEventListener('pointercancel',cancel);root.addEventListener('keydown',keydown);
   raf=requestAnimationFrame(draw);
   return {
-    setSample(value){if(value&&Number.isFinite(value.head)&&Number.isFinite(value.torso)){sample={head:value.head,torso:value.torso};lastSample=performance.now();}},
+    setSample(value){
+      const previousContact=sample.contact!==false;
+      sample={head:Number.isFinite(value?.head)?value.head:null,torso:Number.isFinite(value?.torso)?value.torso:null,contact:value?.contact!==false};
+      const valid=pointTemperature(null,sample)!==null,contact=sample.contact;
+      if(valid){lastValidSample={head:sample.head,torso:sample.torso};lastSample=performance.now();}
+      empty.hidden=contact;imageCanvas.style.visibility=contact?'visible':'hidden';overlay.style.visibility=contact?'visible':'hidden';
+      root.dataset.contact=String(contact);
+      for(const label of labels){
+        label.element.hidden=!contact;
+        label.led.dataset.live=String(valid);
+        label.led.setAttribute('aria-label',valid?'추적 중':'추적 대기');
+        if(!valid)label.value.textContent='--.-°C';
+      }
+      if(previousContact!==contact)status.textContent=contact?'아기 온도 측정을 시작합니다.':'패드에 아기가 없어요. 아기를 눕히면 측정을 시작해요.';
+      lastDraw=-Infinity;
+    },
     setSelected(point){select(point,false);},
     destroy(){disposed=true;cancelAnimationFrame(raf);observer.disconnect();renderer?.destroy();root.remove();}
   };

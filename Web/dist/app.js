@@ -19,7 +19,7 @@ const paths = {
 };
 const icon = name => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.thermometer}</svg>`;
 $$('[data-icon]').forEach(el => el.innerHTML = icon(el.dataset.icon));
-const fmt = value => Number.isFinite(value) ? value.toFixed(1) : '—';
+const fmt = value => Number.isFinite(value) ? value.toFixed(1) : '--.-';
 const clock = value => new Date(value).toLocaleTimeString('ko-KR', {hour:'numeric',minute:'2-digit'});
 const shortClock = value => new Date(value).toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit',hour12:false});
 const dateLabel = value => new Date(value).toLocaleDateString('ko-KR', {month:'long',day:'numeric'});
@@ -33,10 +33,11 @@ try {
   if(saved && Number.isFinite(saved.low) && Number.isFinite(saved.high) && saved.low >= 30 && saved.high <= 45 && saved.high-saved.low >= .999) settings = saved;
 } catch {}
 let draft = {...settings};
-const startedAt = Date.now();
+let startedAt = Date.now();
+let mode = 'steady';
 let tab = 'home';
 let selected = null;
-let latest = {date:startedAt,head:36.6,torso:36.8};
+let latest = {date:startedAt,head:36.6,torso:36.8,contact:true};
 let lastIndex = -1;
 let popup = null;
 let activeEvent = null;
@@ -55,21 +56,26 @@ let tracking = {minutes:15,selection:null};
 let storageIssue = false;
 let lastFocused = null;
 const main = $('#main'), sheet = $('#sheet'), alertDialog = $('#alert');
+const validSample = sample => sample?.contact !== false && Number.isFinite(sample?.head) && Number.isFinite(sample?.torso);
 
 function inputAt(seconds) {
   let torso;
-  if(seconds < 10) torso = 36.8;
+  if(mode === 'steady') torso = 36.8 + .08*Math.sin(seconds/37);
+  else if(seconds < 10) torso = 36.8;
   else if(seconds < 30) torso = 36.8 + .6 * (seconds-10)/20;
   else if(seconds < 60) torso = 37.4 + (seconds-30)/30;
   else if(seconds < 90) torso = 38.4 + .2*(seconds-60)/30;
   else torso = 38.5 + .1*Math.cos((seconds-90)/35);
-  return {date:startedAt+seconds*1000,head:Math.round((torso-.2+1e-9)*10)/10,torso:Math.round((torso+1e-9)*10)/10};
+  return {date:startedAt+seconds*1000,head:Math.round((torso-.2+1e-9)*10)/10,torso:Math.round((torso+1e-9)*10)/10,contact:true};
 }
 function seedHistory() {
   samples = [];
   events = [];
-  for(let offset=-86400;offset<0;offset+=60) samples.push({date:startedAt+offset*1000,head:36.6,torso:36.8});
-  const seeds = [['rise',-24*60,37.3,36.8],['high',-2*3600,38.2,36.8],['connection',-5*3600,null,null],['rise',-19*3600,37.4,36.9]];
+  for(let offset=-7*86400;offset<0;offset+=60) {
+    const torso=36.8+.08*Math.sin(offset/1800)+.06*Math.sin(Math.floor(offset/86400)*1.3);
+    samples.push({date:startedAt+offset*1000,head:torso-.2,torso,contact:true});
+  }
+  const seeds = mode==='fever'?[['rise',-24*60,37.3,36.8],['high',-2*3600,38.2,36.8],['connection',-5*3600,null,null],['rise',-19*3600,37.4,36.9]]:[];
   seeds.forEach(([kind,offset,value,reference])=>{
     const date = startedAt+offset*1000;
     const event = {id:`past-${kind}-${date}`,kind,date,value,reference,low:36,high:38,ack:date+24000,resolved:date+(kind==='connection'?120000:600000)};
@@ -79,10 +85,18 @@ function seedHistory() {
     for(let second=-600;second<=600;second+=5){
       const baseline=reference;
       const temperature=second < -120 ? baseline : second < 0 ? baseline+(value-baseline)*(second+120)/120 : value+(36.8-value)*second/600;
-      samples.push({date:date+second*1000,head:temperature-.2,torso:temperature});
+      samples.push({date:date+second*1000,head:temperature-.2,torso:temperature,contact:true});
     }
   });
   samples.sort((a,b)=>a.date-b.date);
+  const away=[[-21*3600,-20*3600-15*60],[-15*3600-30*60,-15*3600],[-9*3600,-8*3600-20*60],[-4*3600,-3*3600-20*60],[-12*60,-7*60]];
+  samples=samples.map(sample=>{
+    const offset=(sample.date-startedAt)/1000;
+    const dayOffset=((offset%86400)+86400)%86400-86400;
+    if(away.some(([start,end])=>dayOffset>=start&&dayOffset<end))return {...sample,head:null,torso:null,contact:false};
+    if(mode==='fever'&&offset>=-5*3600&&offset<-5*3600+120)return {...sample,head:null,torso:null,contact:true};
+    return sample;
+  });
 }
 function eventTitle(event) {return event.kind==='rise'?'온도 변화를 확인해 주세요':event.kind==='connection'?'온도 정보를 받지 못했어요':'온도를 확인해 주세요';}
 function eventLabel(event) {return ({rise:'빠른 온도 상승',high:'상한 초과',low:'하한 미만',connection:'연결 확인'})[event.kind];}
@@ -93,8 +107,14 @@ function eventDescription(event) {
   return '새로운 온도 정보가 도착하지 않았어요. 패드 연결을 확인해 주세요.';
 }
 function receive(sample) {
+  if(!validSample(sample)){
+    latest=sample;samples.push(sample);liveSamples=[];
+    if(activeEvent){activeEvent.resolved=sample.date;activeEvent.endReason='측정 중단';activeEvent=null;}
+    if(popup){popup=null;if(alertDialog.open)alertDialog.close();}
+    queued=[];return;
+  }
   const value=Math.max(sample.head,sample.torso);
-  const baseline=Math.min(...liveSamples.filter(s=>sample.date-s.date<=300000).map(s=>Math.max(s.head,s.torso)));
+  const baseline=Math.min(...liveSamples.filter(s=>validSample(s)&&sample.date-s.date<=300000).map(s=>Math.max(s.head,s.torso)));
   const absolute=value>settings.high?'high':value<settings.low?'low':null;
   let kind=null;
   if(activeEvent){
@@ -111,13 +131,13 @@ function tick(){
   const index=Math.floor((Date.now()-startedAt)/5000);
   for(let i=lastIndex+1;i<=index;i++) receive(inputAt(i*5));
   if(index!==lastIndex){lastIndex=index;updateReadings();updateSheetData();if(tab==='events')renderEvents();}
-  const age=$('#reading-age');if(age)age.textContent=`${Math.max(0,Math.floor((Date.now()-latest.date)/1000))}초 전 갱신`;
+  const age=$('#reading-age');if(age)age.textContent=validSample(latest)?`${Math.max(0,Math.floor((Date.now()-latest.date)/1000))}초 전 갱신`:'측정 대기';
   $('#alert-dot').hidden=!events.some(e=>!e.ack&&!e.resolved);
   presentNext();
 }
 function setPoint(point){selected=point;homeMonitor?.setSelected(point);expandedMonitor?.setSelected(point);tracking.selection=null;updateReadings();if(sheetKind==='expanded')renderTracking();}
-function selectedValue(sample=latest){return pointTemperature(selected,sample);}
-function warning(){return !!activeEvent||latest.torso>settings.high||latest.torso<settings.low;}
+function selectedValue(sample=latest){return validSample(sample)?pointTemperature(selected,sample):null;}
+function warning(){return validSample(latest)&&(!!activeEvent||latest.torso>settings.high||latest.torso<settings.low);}
 function renderHome(){
   main.innerHTML=`<div class="page-heading"><h1>모니터링</h1><time datetime="${new Date().toISOString()}">${dateLabel(Date.now())}</time></div>
     <section class="monitor-card" aria-label="아기 온도 모니터링">
@@ -133,13 +153,13 @@ function updateReadings(){
   if(tab!=='home')return;
   $('#current-temperature').textContent=fmt(selectedValue());
   $('#reading-title').textContent=selected?'선택 지점':'보정 온도';
-  $('#reading-state').innerHTML=selected?'<span class="muted tiny">빈 곳을 눌러 해제</span>':`<i class="status-dot${warning()?' warning':''}" aria-hidden="true"></i><span>${warning()?'온도 확인 필요':'설정 범위 안'}</span>`;
-  $('#reading-age').textContent=`${Math.max(0,Math.floor((Date.now()-latest.date)/1000))}초 전 갱신`;
+  $('#reading-state').innerHTML=!validSample(latest)?`<span class="muted tiny">${latest.contact===false?'패드에 아기가 없어요':'측정 대기'}</span>`:selected?'<span class="muted tiny">빈 곳을 눌러 해제</span>':`<i class="status-dot${warning()?' warning':''}" aria-hidden="true"></i><span>${warning()?'온도 확인 필요':'설정 범위 안'}</span>`;
+  $('#reading-age').textContent=validSample(latest)?`${Math.max(0,Math.floor((Date.now()-latest.date)/1000))}초 전 갱신`:'측정 대기';
 }
 function eventCard(event){return `<button class="event-card" data-event="${event.id}"><span class="event-glyph">${icon(event.kind==='connection'?'wifi':'thermometer')}</span><span class="event-copy"><h3>${eventLabel(event)}</h3><p>${eventDescription(event)}</p><time>${fullDate(event.date)}</time></span><span class="event-status${!event.resolved?' active':''}">${event.resolved?'종료':event.ack?'확인함':'확인 필요'}</span></button>`;}
 function bindEvents(root=document){$$('[data-event]',root).forEach(el=>el.onclick=()=>openSheet('event',el.dataset.event));}
 function renderEvents(){
-  main.innerHTML=`<div class="page-heading"><h1>알림 기록</h1></div><p class="page-subtitle">최근 알림을 확인하세요</p><p class="count-label">최근 7일 · ${events.length}건</p><div class="event-list">${events.slice().sort((a,b)=>b.date-a.date).map(eventCard).join('')}</div>`;bindEvents(main);
+  main.innerHTML=`<div class="page-heading"><h1>알림 기록</h1></div><p class="page-subtitle">최근 알림을 확인하세요</p>${events.length?`<p class="count-label">최근 7일 · ${events.length}건</p><div class="event-list">${events.slice().sort((a,b)=>b.date-a.date).map(eventCard).join('')}</div>`:`<section class="empty-events"><span class="event-glyph">${icon('bell')}</span><h2>새로운 알림이 없어요</h2><p>온도 변화가 감지되면<br>이곳에서 확인할 수 있어요.</p></section>`}`;bindEvents(main);
 }
 function renderSettings(){
   draft={...settings};
@@ -169,6 +189,18 @@ function setTab(value){
   window.scrollTo({top:0,behavior:'instant'});
 }
 $$('[data-tab]').forEach(button=>button.onclick=()=>setTab(button.dataset.tab));
+function switchMode(value){
+  if(!['steady','fever'].includes(value))return;
+  if(alertDialog.open)alertDialog.close();if(sheet.open)sheet.close();
+  expandedMonitor?.destroy();expandedMonitor=null;sheetKind=null;sheetStack=[];eventId=null;
+  popup=null;activeEvent=null;queued=[];shown=new Set();liveSamples=[];selected=null;
+  mode=value;startedAt=Date.now();lastIndex=0;
+  history={period:'day',region:'torso',anchor:startedAt,selection:null};tracking={minutes:15,selection:null};
+  seedHistory();receive(inputAt(0));
+  $$('[data-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===mode)));
+  setTab('home');tick();
+}
+$$('[data-mode]').forEach(button=>button.onclick=()=>switchMode(button.dataset.mode));
 
 function sheetHeader(title){return `<header class="sheet-header"><h2 id="sheet-title">${title}</h2><button class="close-text" id="close-sheet" autofocus>닫기</button></header><div id="sheet-body" class="sheet-body"></div>`;}
 function openSheet(kind,id=null){
@@ -194,11 +226,11 @@ function renderExpanded(){
 function renderTracking(){
   if(sheetKind!=='expanded')return;
   const end=Date.now(),start=end-tracking.minutes*60000;
-  const raw=samples.filter(s=>s.date>=start&&s.date<=end).map(s=>({date:s.date,v:pointTemperature(selected,s)}));
-  const chosen=tracking.selection===null?null:nearest(raw,tracking.selection,75000);
+  const raw=segmentedSamples(samples.filter(s=>s.date>=start&&s.date<=end)).map(s=>({...s,v:validSample(s)?pointTemperature(selected,s):null}));
+  const chosen=tracking.selection===null?null:readingAt(raw,tracking.selection);
   $('#tracking-title').textContent=selected?'선택 지점 온도':'대표 보정 온도';
   $('#tracking-value').textContent=fmt(tracking.selection===null?selectedValue():chosen?.v);
-  $('#tracking-caption').textContent=tracking.selection===null?'실시간 추이':chosen?clock(chosen.date):'이 시각의 기록 없음';
+  $('#tracking-caption').textContent=tracking.selection===null?(validSample(latest)?'실시간 추이':latest.contact===false?'패드에 아기가 없어요':'측정 대기'):chosen?clock(chosen.date):`${shortClock(tracking.selection)} · 측정 없음`;
   $('#monitor-hint').textContent=selected?'빈 곳을 누르면 기본 추적으로 돌아가요':'아기 위의 격자를 눌러 온도를 확인하세요';
   renderChart($('#live-chart'),raw,{start,end,chosen,onSelect:date=>{tracking.selection=date;renderTracking();}});
 }
@@ -207,12 +239,26 @@ function interval(){
   return history.period==='day'?{start:dayStart(history.anchor),end}:{start:nextDay(dayStart(history.anchor),-6),end};
 }
 function historyData(){
-  const {start,end}=interval();const records=samples.filter(s=>s.date>=start&&s.date<end);const unit=history.period==='day'?300000:86400000;
+  const {start,end}=interval();const records=segmentedSamples(samples.filter(s=>s.date>=start&&s.date<end));
   const bins=new Map(),minutes=new Map();
-  records.forEach(s=>{const key=history.period==='day'?Math.floor(s.date/unit)*unit:dayStart(s.date);if(!bins.has(key))bins.set(key,[]);bins.get(key).push(s[history.region]);const minute=Math.floor(s.date/60000);if(!minutes.has(minute))minutes.set(minute,[]);minutes.get(minute).push(s[history.region]);});
-  const points=[...bins].sort((a,b)=>a[0]-b[0]).map(([date,values])=>({date:history.period==='week'?date+43200000:date+150000,bucket:date,v:average(values),min:Math.min(...values),max:Math.max(...values)}));
-  const values=records.map(s=>s[history.region]);
-  let chosen=null;if(history.selection!==null){const bucket=history.period==='week'?dayStart(history.selection):Math.floor(history.selection/300000)*300000;chosen=points.find(p=>p.bucket===bucket)||null;}
+  records.filter(validSample).forEach(s=>{
+    const bucket=history.period==='day'?Math.floor(s.date/300000)*300000:dayStart(s.date);
+    const key=history.period==='day'?`${s.segment}:${bucket}`:String(bucket);
+    if(!bins.has(key))bins.set(key,{bucket,segment:s.segment,readings:[]});bins.get(key).readings.push(s);
+    const minute=Math.floor(s.date/60000);if(!minutes.has(minute))minutes.set(minute,[]);minutes.get(minute).push(s[history.region]);
+  });
+  const points=[...bins.values()].map(({bucket,segment,readings})=>{
+    const values=readings.map(s=>s[history.region]);
+    const minuteBins=new Map();readings.forEach(s=>{const minute=Math.floor(s.date/60000);if(!minuteBins.has(minute))minuteBins.set(minute,[]);minuteBins.get(minute).push(s[history.region]);});
+    return {date:history.period==='week'?bucket+43200000:average(readings.map(s=>s.date)),bucket,segment:history.period==='week'?0:segment,v:average([...minuteBins.values()].map(average)),min:Math.min(...values),max:Math.max(...values)};
+  }).sort((a,b)=>a.date-b.date);
+  const values=records.filter(validSample).map(s=>s[history.region]);
+  let chosen=null;
+  if(history.selection!==null){
+    const bucket=history.period==='week'?dayStart(history.selection):Math.floor(history.selection/300000)*300000;
+    const reading=history.period==='day'?readingAt(records,history.selection):null;
+    chosen=points.find(p=>p.bucket===bucket&&(history.period==='week'||(reading&&p.segment===reading.segment)))||null;
+  }
   return {start,end,records,points,chosen,mean:average([...minutes.values()].map(average)),min:values.length?Math.min(...values):NaN,max:values.length?Math.max(...values):NaN};
 }
 function renderHistory(){
@@ -230,15 +276,15 @@ function updateHistory(){
   $('#date-range').textContent=history.period==='day'?dateLabel(data.start):`${dateLabel(data.start)} – ${dateLabel(data.end-1)}`;
   $('#previous-period').disabled=data.start<=samples[0].date;
   $('#next-period').disabled=data.end>Date.now();
-  $('#history-summary-title').textContent=choosing?(data.chosen?(history.period==='week'?'선택일 평균':'선택 구간 평균'):'이 시각의 기록 없음'):'평균';
+  $('#history-summary-title').textContent=choosing?(data.chosen?(history.period==='week'?'선택일 평균':'선택 구간 평균'):'측정 없음'):'평균';
   $('#history-value').textContent=fmt(choosing?data.chosen?.v:data.mean);
-  $('#history-caption').textContent=choosing?(history.period==='week'?dateLabel(history.selection):`${shortClock(history.selection)} · 5분 구간`):(history.period==='week'?'날짜별 온도 범위와 평균':'5분 구간별 온도 흐름');
+  $('#history-caption').textContent=choosing?(history.period==='week'?dateLabel(history.selection):`${shortClock(history.selection)} · ${data.chosen?'5분 구간':'측정된 온도가 없어요'}`):(history.period==='week'?'날짜별 평균 온도':'5분 구간별 온도 · 측정이 없으면 선이 끊겨요');
   $('#clear-history-selection').hidden=!choosing;$('#history-min').textContent=fmt(data.min);$('#history-max').textContent=fmt(data.max);
   renderChart($('#history-chart'),data.points,{start:data.start,end:data.end,chosen:data.chosen,week:history.period==='week',history:true,onSelect:date=>{history.selection=date;updateHistory();}});
   const relevant=events.filter(e=>e.date>=data.start&&e.date<data.end).sort((a,b)=>b.date-a.date);
   $('#history-event-count').textContent=`알림 ${relevant.length}건`;
   $('#history-events').innerHTML=relevant.length?relevant.map(eventCard).join(''):'<p class="small muted">이 기간에는 알림이 없어요.</p>';bindEvents($('#history-events'));
-  $('#history-readings').innerHTML=data.records.slice(-8).reverse().map(s=>`<div class="definition-row"><dt>${clock(s.date)}</dt><dd>${fmt(s[history.region])} °C</dd></div>`).join('')||'<p class="small muted">이 기간에는 측정값이 없어요.</p>';
+  $('#history-readings').innerHTML=data.records.slice(-8).reverse().map(s=>`<div class="definition-row"><dt>${clock(s.date)}</dt><dd>${validSample(s)?`${fmt(s[history.region])} °C`:'측정 없음'}</dd></div>`).join('')||'<p class="small muted">이 기간에는 측정값이 없어요.</p>';
 }
 function renderEventDetail(){
   const event=events.find(e=>e.id===eventId);if(!event)return;
@@ -246,45 +292,70 @@ function renderEventDetail(){
 }
 function updateEventDetail(){
   if(sheetKind!=='event')return;const event=events.find(e=>e.id===eventId);if(!event)return;
-  const facts=[['발생',fullDate(event.date)],['확인',event.ack?clock(event.ack):'아직 확인하지 않음'],['종료',event.resolved?clock(event.resolved):'상태 확인 중'],...(event.reference?[['상승 기준',`${fmt(event.reference)} °C`]]:[]),['당시 기준',`${fmt(event.low)} – ${fmt(event.high)} °C`]];
+  const facts=[['발생',fullDate(event.date)],['확인',event.ack?clock(event.ack):'아직 확인하지 않음'],['종료',event.resolved?clock(event.resolved):'상태 확인 중'],...(event.endReason?[['종료 사유',event.endReason]]:[]),...(event.reference?[['상승 기준',`${fmt(event.reference)} °C`]]:[]),['당시 기준',`${fmt(event.low)} – ${fmt(event.high)} °C`]];
   $('#event-facts').innerHTML=facts.map(([key,value])=>`<div class="definition-row"><dt>${key}</dt><dd>${value}</dd></div>`).join('');
-  const start=event.date-300000,end=event.date+300000,points=samples.filter(s=>s.date>=start&&s.date<=end).map(s=>({date:s.date,v:Math.max(s.head,s.torso)}));renderChart($('#event-chart'),points,{start,end});
+  const start=event.date-300000,end=event.date+300000,points=segmentedSamples(samples.filter(s=>s.date>=start&&s.date<=end)).map(s=>({...s,v:validSample(s)?Math.max(s.head,s.torso):null}));renderChart($('#event-chart'),points,{start,end});
 }
 function renderInfo(){
   $('#sheet-body').innerHTML=`<section class="section-card info-copy"><h3>패드 위에서 살피는 온도</h3><p>아기가 누운 패드의 접촉 영역을 따라 온도를 살펴봅니다. 화면의 색과 격자는 관찰 중인 영역의 온도 분포를 보여줍니다.</p><h3>머리와 몸통 영역</h3><p>기본 화면은 머리와 몸통을 함께 보여줍니다. 아기의 자세에 따라 패드와 닿는 부위는 달라질 수 있어요. 다른 지점을 누르면 그 지점의 온도를 확인할 수 있습니다.</p><h3>작은 변화부터 확인해요</h3><p>설정 범위 이탈이나 빠른 상승이 감지되면 알려드려요. 알림을 받으면 아기의 상태를 확인해 주세요.</p></section>`;
 }
 function updateSheetData(){if(sheetKind==='expanded')renderTracking();if(sheetKind==='history')updateHistory();if(sheetKind==='event')updateEventDetail();}
 
-function nearest(points,date,tolerance=Infinity){if(!points.length)return null;const point=points.reduce((a,b)=>Math.abs(a.date-date)<Math.abs(b.date-date)?a:b);return Math.abs(point.date-date)<=tolerance?point:null;}
+function segmentedSamples(records){
+  let segment=0,previous=null;
+  return records.map(sample=>{
+    if(!validSample(sample)){segment++;previous=null;return {...sample,segment};}
+    if(previous&&sample.date-previous.date>75000)segment++;
+    previous=sample;return {...sample,segment};
+  });
+}
+function readingAt(records,date){
+  if(!records.length)return null;
+  // A missing reading starts a gap that lasts until valid contact resumes.
+  let before=null,after=null;
+  for(const sample of records){if(sample.date<=date)before=sample;else{after=sample;break;}}
+  if(before&&!validSample(before))return null;
+  if(!before||date-before.date>75000)return null;
+  if(after&&!validSample(after))return before;
+  const result=after&&after.date-date<date-before.date?after:before;
+  return validSample(result)?result:null;
+}
 function renderChart(element,points,options){
   if(!element)return;
-  if(!points.length){element.innerHTML='<div class="empty-state">이 기간에는 온도 기록이 없어요</div>';element.onpointerdown=null;return;}
+  const validPoints=points.filter(p=>Number.isFinite(p.v));
+  if(!validPoints.length){element.innerHTML='<div class="empty-state">이 기간에는 온도 기록이 없어요</div>';element.onpointerdown=null;element.onpointermove=null;element.onkeydown=null;return;}
   const {start,end,chosen,week=false,onSelect}=options;
   const width=360,height=184,left=8,right=40,top=8,bottom=28,pw=width-left-right,ph=height-top-bottom;
-  const low=Math.min(36,Math.floor((Math.min(...points.map(p=>p.min??p.v))-.15)*2)/2),high=Math.max(38.5,Math.ceil((Math.max(...points.map(p=>p.max??p.v))+.15)*2)/2);
+  const low=Math.min(36,Math.floor((Math.min(...validPoints.map(p=>p.min??p.v))-.15)*2)/2),high=Math.max(38.5,Math.ceil((Math.max(...validPoints.map(p=>p.max??p.v))+.15)*2)/2);
   const x=date=>left+(date-start)/(end-start)*pw,y=v=>top+(high-v)/(high-low)*ph;
   let svg='';
   for(let i=0;i<4;i++){const value=low+(high-low)*i/3;const yy=y(value);svg+=`<line class="chart-axis" x1="${left}" y1="${yy}" x2="${width-right}" y2="${yy}"/><text class="chart-label" x="${width-right+8}" y="${yy+3}">${fmt(value)}</text>`;}
   if(week){
     for(let i=0;i<7;i++){const date=nextDay(start,i)+43200000;svg+=`<text class="chart-label" text-anchor="middle" x="${x(date)}" y="${height-4}">${new Date(date).toLocaleDateString('ko-KR',{weekday:'narrow'})}</text>`;}
-    points.forEach(p=>{const yy=y(p.max),yy2=y(p.min);svg+=`<line x1="${x(p.date)}" y1="${yy}" x2="${x(p.date)}" y2="${yy2}" stroke="#a60031" stroke-opacity=".4" stroke-width="10" stroke-linecap="round"/><circle cx="${x(p.date)}" cy="${y(p.v)}" r="2.8" fill="#a60031"/>`;});
   }else{
     for(let i=0;i<4;i++){const date=start+(end-start)*i/3;svg+=`<text class="chart-label" text-anchor="${i===0?'start':i===3?'end':'middle'}" x="${x(date)}" y="${height-4}">${shortClock(date)}</text>`;}
-    let groups=[],current=[];
-    points.forEach(p=>{const previous=current.at(-1);if(previous&&p.date-previous.date>(options.history?600000:75000)){groups.push(current);current=[];}current.push(p);});if(current.length)groups.push(current);
-    groups.forEach(group=>{
-      const line=group.map((p,i)=>`${i?'L':'M'}${x(p.date).toFixed(2)},${y(p.v).toFixed(2)}`).join(' ');
-      if(group.length>1){const area=`${line} L${x(group.at(-1).date)},${y(low)} L${x(group[0].date)},${y(low)}Z`;svg+=`<path class="chart-area" d="${area}"/><path class="chart-path" d="${line}"/>`;}else{svg+=`<circle cx="${x(group[0].date)}" cy="${y(group[0].v)}" r="2" fill="#a60031"/>`;}
-      if(options.history&&group.length>1){const range=group.map((p,i)=>`${i?'L':'M'}${x(p.date)},${y(p.max)}`).join(' ')+group.slice().reverse().map(p=>`L${x(p.date)},${y(p.min)}`).join(' ')+'Z';svg+=`<path d="${range}" fill="#a6003112"/>`;}
-    });
   }
+  const groups=[];let current=[];
+  const flush=()=>{if(current.length)groups.push(current);current=[];};
+  points.forEach(p=>{
+    if(!Number.isFinite(p.v)){flush();return;}
+    const previous=current.at(-1);
+    const broken=previous&&(week?dayStart(p.date)!==nextDay(dayStart(previous.date)):(p.segment!==previous.segment||p.date-previous.date>(options.history?600000:75000)));
+    if(broken)flush();current.push(p);
+  });flush();
+  groups.forEach(group=>{
+    const line=group.map((p,i)=>`${i?'L':'M'}${x(p.date).toFixed(2)},${y(p.v).toFixed(2)}`).join(' ');
+    if(group.length>1){const area=`${line} L${x(group.at(-1).date)},${y(low)} L${x(group[0].date)},${y(low)}Z`;svg+=`<path class="chart-area" d="${area}"/><path class="chart-path" d="${line}"/>`;}
+    if(week||group.length===1)group.forEach(p=>{svg+=`<circle cx="${x(p.date)}" cy="${y(p.v)}" r="${week?2.8:2}" fill="#a60031"/>`;});
+    if(options.history&&!week&&group.length>1){const range=group.map((p,i)=>`${i?'L':'M'}${x(p.date)},${y(p.max)}`).join(' ')+group.slice().reverse().map(p=>`L${x(p.date)},${y(p.min)}`).join(' ')+'Z';svg+=`<path d="${range}" fill="#a6003112"/>`;}
+  });
   if(chosen)svg+=`<line x1="${x(chosen.date)}" y1="${top}" x2="${x(chosen.date)}" y2="${height-bottom}" stroke="#a60031" stroke-opacity=".25"/><circle cx="${x(chosen.date)}" cy="${y(chosen.v)}" r="4" fill="#a60031" stroke="white" stroke-width="2"/>`;
   element.innerHTML=`<svg viewBox="0 0 ${width} ${height}" aria-hidden="true">${svg}</svg>`;
   if(onSelect){
     const choose=event=>{const bounds=element.getBoundingClientRect();const xx=(event.clientX-bounds.left)/bounds.width*width;const date=start+Math.max(0,Math.min(1,(xx-left)/pw))*(end-start);onSelect(date);};
     element.onpointerdown=event=>{if(event.button===0){element.setPointerCapture?.(event.pointerId);choose(event);}};
     element.onpointermove=event=>{if(event.buttons===1)choose(event);};
-    element.onkeydown=event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const index=chosen?points.indexOf(chosen):(event.key==='ArrowLeft'?points.length: -1);const next=Math.max(0,Math.min(points.length-1,index+(event.key==='ArrowLeft'?-1:1)));onSelect(points[next].date);}};
+    element.onkeydown=event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const index=chosen?validPoints.indexOf(chosen):(event.key==='ArrowLeft'?validPoints.length: -1);const next=Math.max(0,Math.min(validPoints.length-1,index+(event.key==='ArrowLeft'?-1:1)));onSelect(validPoints[next].date);}};
   }
 }
 function presentNext(){
