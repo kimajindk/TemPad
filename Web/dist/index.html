@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f5ed">
+  <meta name="description" content="TemPad — 아기의 온도와 작은 변화를 한눈에.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>TemPad · 온도 모니터링</title>
+  <link rel="icon" href="./assets/icon.png">
+  <link rel="apple-touch-icon" href="./assets/icon.png">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><filter id="logo-ink" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 .65 0 0 0 0 0 0 0 0 0 .19 -.5325 -1.788 -.1805 0 2"/><feComposite in2="SourceAlpha" operator="in"/></filter></defs></svg>
+  <div class="app-shell">
+    <header class="home-header">
+      <img src="./assets/logo.png" class="wordmark" alt="TemPad" width="128" height="38">
+      <span class="connection"><i aria-hidden="true"></i>패드 연결됨</span>
+    </header>
+    <main id="main" tabindex="-1"></main>
+    <nav class="bottom-nav" aria-label="주요 메뉴">
+      <button type="button" data-tab="home" aria-current="page"><span class="nav-icon" data-icon="home"></span><span>홈</span></button>
+      <button type="button" data-tab="events"><span class="nav-icon" data-icon="bell"></span><span>알림</span><i id="alert-dot" hidden></i></button>
+      <button type="button" data-tab="settings"><span class="nav-icon" data-icon="sliders"></span><span>설정</span></button>
+    </nav>
+  </div>
+  <dialog id="sheet" class="sheet" aria-labelledby="sheet-title"></dialog>
+  <dialog id="alert" class="alert-dialog" aria-labelledby="alert-title" aria-describedby="alert-description"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <noscript><p class="noscript">TemPad를 사용하려면 브라우저의 JavaScript를 켜주세요.</p></noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
