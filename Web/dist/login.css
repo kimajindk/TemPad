@@ -1,0 +1,88 @@
+.login-screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding: calc(40px + env(safe-area-inset-top)) 32px calc(24px + env(safe-area-inset-bottom));
+  background: var(--cream);
+  overflow: hidden;
+}
+.login-screen .login-wordmark {
+  display: block;
+  width: 160px;
+  max-width: 70%;
+  height: auto;
+  margin: 0 0 56px -8px;
+}
+.login-intro h1 {
+  font-size: 32px;
+  line-height: 1.4;
+  letter-spacing: -1.3px;
+  font-weight: 600;
+}
+.login-intro p {
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.8;
+  letter-spacing: -.2px;
+}
+.login-visual {
+  position: relative;
+  flex: none;
+  width: calc(100% + 32px);
+  aspect-ratio: 16 / 10;
+  margin: 32px -16px 24px;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+}
+.login-visual::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(ellipse at 50% 50%, #bcdfe9 0%, #dce9e6 42%, #f6f5ed00 72%);
+}
+.login-visual img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+.login-actions {
+  margin-top: auto;
+  padding-top: 24px;
+}
+.login-screen #login-button {
+  display: block;
+  min-height: 56px;
+  padding: 16px 24px;
+  border-radius: 16px;
+  font-size: 15px;
+  line-height: 1.6;
+  font-weight: 600;
+}
+.login-footer {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.6;
+  letter-spacing: .6px;
+  color: #96928b;
+}
+@media (min-width: 600px) {
+  .login-screen { min-height: calc(100dvh - 48px); }
+}
+@media (max-height: 740px) {
+  .login-screen { padding-top: calc(32px + env(safe-area-inset-top)); }
+  .login-screen .login-wordmark { margin-bottom: 32px; }
+  .login-intro h1 { font-size: 28px; }
+  .login-visual { aspect-ratio: 16 / 8; margin-top: 24px; margin-bottom: 16px; }
+  .login-actions { padding-top: 16px; }
+}
+@media (max-width: 360px) {
+  .login-screen { padding-right: 24px; padding-left: 24px; }
+  .login-screen .login-wordmark { width: 144px; }
+  .login-intro h1 { font-size: 28px; }
+  .login-intro p { font-size: 12px; }
+}

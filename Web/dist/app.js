@@ -35,6 +35,7 @@ try {
   if(saved && Number.isFinite(saved.low) && Number.isFinite(saved.high) && saved.low >= 30 && saved.high <= 45 && saved.high-saved.low >= .999) settings = saved;
 } catch {}
 let draft = {...settings};
+let signedIn = false;
 let startedAt = Date.now();
 let mode = 'steady';
 let tab = 'home';
@@ -140,6 +141,7 @@ function receive(sample) {
   }
 }
 function tick(){
+  if(!signedIn)return;
   const step=sampleIntervalSeconds();
   const index=Math.floor((Date.now()-startedAt)/(step*1000));
   for(let i=lastIndex+1;i<=index;i++) receive(inputAt(i*step));
@@ -356,6 +358,13 @@ function acknowledge(detail){
   if(detail)openSheet('event',event.id);if(tab==='events')renderEvents();updateSheetData();setTimeout(presentNext,200);
 }
 alertDialog.addEventListener('cancel',event=>{event.preventDefault();acknowledge(false);});
-seedHistory();receive(inputAt(0));lastIndex=0;setTab('home');tick();
+$('#login-button').onclick=()=>{
+  if(signedIn)return;
+  signedIn=true;
+  $('#login-screen').hidden=true;
+  $('#monitoring-app').hidden=false;
+  switchMode('steady');
+  main.focus({preventScroll:true});
+};
 setInterval(tick,250);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick();});

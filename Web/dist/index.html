@@ -12,20 +12,29 @@
   <link rel="apple-touch-icon" href="./assets/icon.png">
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./status.css">
+  <link rel="stylesheet" href="./login.css">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><filter id="logo-ink" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 .65 0 0 0 0 0 0 0 0 0 .19 -.5325 -1.788 -.1805 0 2"/><feComposite in2="SourceAlpha" operator="in"/></filter></defs></svg>
   <div class="app-shell">
-    <header class="home-header">
-      <img src="./assets/logo.png" class="wordmark" alt="TemPad" width="128" height="38">
-      <div class="mode-control" role="group" aria-label="온도 모드"><button type="button" data-mode="steady" aria-pressed="true"><span>모드 1</span><strong>평시</strong></button><button type="button" data-mode="fever" aria-pressed="false"><span>모드 2</span><strong>열날 때</strong></button></div>
-    </header>
-    <main id="main" tabindex="-1"></main>
-    <nav class="bottom-nav" aria-label="주요 메뉴">
-      <button type="button" data-tab="home" aria-current="page"><span class="nav-icon" data-icon="home"></span><span>홈</span></button>
-      <button type="button" data-tab="events"><span class="nav-icon" data-icon="bell"></span><span>알림</span><i id="alert-dot" hidden></i></button>
-      <button type="button" data-tab="settings"><span class="nav-icon" data-icon="sliders"></span><span>설정</span></button>
-    </nav>
+    <section id="login-screen" class="login-screen" aria-labelledby="login-title">
+      <img src="./assets/logo.png" class="wordmark login-wordmark" alt="TemPad" width="160" height="48">
+      <div class="login-intro"><h1 id="login-title">잠든 아기 곁에<br>가장 조용한 기술</h1><p>온도를 살피는 가장 편안한 방법</p></div>
+      <div class="login-visual" aria-hidden="true"><img src="./assets/baby.png" alt="" width="1672" height="941"></div>
+      <div class="login-actions"><button type="button" id="login-button" class="primary-button">로그인</button><p class="login-footer">TemPad</p></div>
+    </section>
+    <div id="monitoring-app" hidden>
+      <header class="home-header">
+        <img src="./assets/logo.png" class="wordmark" alt="TemPad" width="128" height="38">
+        <div class="mode-control" role="group" aria-label="온도 모드"><button type="button" data-mode="steady" aria-pressed="true"><span>모드 1</span><strong>평시</strong></button><button type="button" data-mode="fever" aria-pressed="false"><span>모드 2</span><strong>열날 때</strong></button></div>
+      </header>
+      <main id="main" tabindex="-1"></main>
+      <nav class="bottom-nav" aria-label="주요 메뉴">
+        <button type="button" data-tab="home" aria-current="page"><span class="nav-icon" data-icon="home"></span><span>홈</span></button>
+        <button type="button" data-tab="events"><span class="nav-icon" data-icon="bell"></span><span>알림</span><i id="alert-dot" hidden></i></button>
+        <button type="button" data-tab="settings"><span class="nav-icon" data-icon="sliders"></span><span>설정</span></button>
+      </nav>
+    </div>
   </div>
   <dialog id="sheet" class="sheet" aria-labelledby="sheet-title"></dialog>
   <dialog id="alert" class="alert-dialog" aria-labelledby="alert-title" aria-describedby="alert-description"></dialog>
