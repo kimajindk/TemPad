@@ -108,7 +108,7 @@ function seedHistory() {
     return sample;
   });
 }
-function eventTitle(event) {return event.kind==='rise'?'온도 변화를 확인해 주세요':event.kind==='connection'?'온도 정보를 받지 못했어요':event.kind==='recovery'?'설정 범위로 돌아왔어요':event.kind==='info'?'측정을 잠시 멈췄어요':'온도를 확인해 주세요';}
+function eventTitle(event) {return event.kind==='rise'?'온도 변화를 확인해 주세요':event.kind==='high'?'병원 방문을 권장해요':event.kind==='connection'?'온도 정보를 받지 못했어요':event.kind==='recovery'?'설정 범위로 돌아왔어요':event.kind==='info'?'측정을 잠시 멈췄어요':'온도를 확인해 주세요';}
 function eventLabel(event) {return ({rise:'빠른 온도 상승',high:'상한 초과',low:'하한 미만',connection:'연결 확인',recovery:'설정 범위 복귀',info:'측정 일시 중지'})[event.kind];}
 function eventDescription(event) {
   if(event.kind==='rise')return `최근 ${fmt(event.reference)} °C에서 ${fmt(event.value)} °C로 올라갔어요. 아기의 상태를 확인해 주세요.`;
