@@ -12,12 +12,12 @@ const maximum = point => Number.isFinite(point.max) ? point.max : point.v;
 export function renderMiniChart(element, points, {start,end}) {
   if(!element)return;
   const valid=points.filter(point=>Number.isFinite(point.v)&&Number.isFinite(+point.date)&&point.date>=start&&point.date<=end);
-  if(!valid.length){element.innerHTML='<span class="mini-empty">측정 없음</span>';return;}
-  const width=160,height=48,pad=4;
+  if(!valid.length){element.innerHTML='<span class="mini-empty">측정 없음</span>';element.setAttribute('aria-label','최근 6시간 측정 없음');return;}
+  const width=160,height=64,left=4,right=36,top=8,bottom=8;
   const low=Math.min(36,Math.min(...valid.map(point=>point.v))-.2);
-  const high=Math.max(38.5,Math.max(...valid.map(point=>point.v))+.2);
-  const x=date=>pad+(date-start)/Math.max(1,end-start)*(width-pad*2);
-  const y=value=>pad+(high-value)/(high-low)*(height-pad*2);
+  const high=Math.max(39,Math.max(...valid.map(point=>point.v))+.2);
+  const x=date=>left+(date-start)/Math.max(1,end-start)*(width-left-right);
+  const y=value=>top+(high-value)/(high-low)*(height-top-bottom);
   const groups=[];let group=[];
   const flush=()=>{if(group.length)groups.push(group);group=[];};
   for(const point of points){
@@ -28,16 +28,20 @@ export function renderMiniChart(element, points, {start,end}) {
   }
   flush();
   let svg='';
+  for(const value of [low,(low+high)/2,high]){
+    const yy=y(value);
+    svg+=`<line x1="${left}" y1="${yy}" x2="${width-right}" y2="${yy}" stroke="#dedad4" stroke-width=".6" stroke-dasharray="2 3"/><text x="${width-right+8}" y="${yy+3}" fill="#96928c" font-size="9" font-variant-numeric="tabular-nums">${fmt(value)}°</text>`;
+  }
   for(const segment of groups){
     const line=segment.map((point,index)=>`${index?'L':'M'}${x(point.date).toFixed(2)},${y(point.v).toFixed(2)}`).join(' ');
     if(segment.length>1){
-      svg+=`<path d="${line} L${x(segment.at(-1).date)},${height} L${x(segment[0].date)},${height}Z" fill="#a6003109"/><path d="${line}" fill="none" stroke="${LINE_COLOR}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+      svg+=`<path d="${line} L${x(segment.at(-1).date)},${height-bottom} L${x(segment[0].date)},${height-bottom}Z" fill="#a6003109"/><path d="${line}" fill="none" stroke="${LINE_COLOR}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
     }else svg+=`<circle cx="${x(segment[0].date)}" cy="${y(segment[0].v)}" r="1.5" fill="${LINE_COLOR}"/>`;
   }
   const last=valid.at(-1);
   if(end-last.date<=75000)svg+=`<circle cx="${x(last.date)}" cy="${y(last.v)}" r="2.5" fill="${LINE_COLOR}" stroke="white" stroke-width="1"/>`;
   element.innerHTML=`<svg viewBox="0 0 ${width} ${height}" aria-hidden="true">${svg}</svg>`;
-  element.setAttribute('aria-label',`최근 15분 온도 변화, ${fmt(valid[0].v)}도에서 ${fmt(last.v)}도`);
+  element.setAttribute('aria-label',`최근 6시간 온도 변화, ${fmt(valid[0].v)}도에서 ${fmt(last.v)}도`);
 }
 
 /** Shared plot for live readings, day segments and seven daily means. */

@@ -1,6 +1,6 @@
 import { createThermalMonitor, pointTemperature } from './thermal.js';
 import { renderChart, renderMiniChart } from './chart.js';
-import { severityForEvent, statusLegendHTML } from './status.js';
+import { statusForReading, faceSVG, severityForEvent, statusLegendHTML } from './status.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -39,6 +39,7 @@ let startedAt = Date.now();
 let mode = 'steady';
 let tab = 'home';
 let selected = null;
+let pointRestoreTimer = null;
 let latest = {date:startedAt,head:36.6,torso:36.8,contact:true};
 let lastIndex = -1;
 let popup = null;
@@ -144,14 +145,20 @@ function tick(){
   $('#alert-dot').hidden=!events.some(e=>!e.ack&&!e.resolved);
   presentNext();
 }
-function setPoint(point){selected=point;homeMonitor?.setSelected(point);tracking.selection=null;history.selection=null;updateReadings();renderInlineChart();}
+function clearPointRestoreTimer(){if(pointRestoreTimer!==null){clearTimeout(pointRestoreTimer);pointRestoreTimer=null;}}
+function setPoint(point){
+  clearPointRestoreTimer();
+  selected=point;homeMonitor?.setSelected(point);tracking.selection=null;history.selection=null;
+  updateReadings();renderInlineChart();
+  if(point)pointRestoreTimer=setTimeout(()=>{pointRestoreTimer=null;setPoint(null);},2000);
+}
 function selectedValue(sample=latest){return validSample(sample)?pointTemperature(selected,sample):null;}
 function chartValue(sample){return validSample(sample)?(selected?pointTemperature(selected,sample):sample[history.region]):null;}
 function renderHome(){
-  main.innerHTML=`<div class="page-heading monitor-heading"><h1>모니터링</h1></div>
+  main.innerHTML=`<div class="page-heading monitor-heading"><h1>모니터링</h1><div id="current-condition" class="condition-face" role="img" aria-label="현재 온도 상태"></div></div>
     <section class="monitor-card" aria-label="아기 온도 모니터링">
-      <div class="thermal-wrap"><div id="thermal-home" class="thermal-view"></div><span class="live-indicator"><i aria-hidden="true"></i>실시간</span></div>
-      <div class="reading-card"><div class="big-value"><span id="current-temperature"></span><span class="unit">°C</span></div><div class="mini-trend"><span class="mini-trend-label">최근 15분</span><div id="mini-chart" class="mini-chart" aria-label="최근 15분 온도 흐름"></div></div></div>
+      <div class="thermal-wrap"><div id="thermal-home" class="thermal-view"></div><span class="live-indicator"><i aria-hidden="true"></i>실시간</span><p class="pose-caption">*AI 추론으로 도출된 아기 자세</p></div>
+      <div class="reading-card"><div class="big-value"><span id="current-temperature"></span><span class="unit">°C</span></div><div class="mini-trend"><span class="mini-trend-label">최근 6시간</span><div id="mini-chart" class="mini-chart" aria-label="최근 6시간 온도 흐름"></div></div></div>
       <section class="inline-tracking" aria-label="온도 흐름"><div class="inline-chart-heading"><h2>온도 흐름</h2><select id="inline-region" class="region-select" aria-label="관찰 영역"><option value="torso">몸통 영역</option><option value="head">머리 영역</option><option value="point" hidden>선택 지점</option></select></div><div class="segments inline-periods" aria-label="기록 기간">${[['60','1시간'],['720','12시간'],['day','하루'],['week','일주일']].map(([period,title])=>`<button data-inline-period="${period}" aria-pressed="${tracking.period===period}" class="${tracking.period===period?'selected':''}">${title}</button>`).join('')}</div>
       <div class="date-navigation inline-date-navigation" id="inline-date-navigation" hidden><button id="previous-period" aria-label="이전 기간">${icon('back')}</button><p id="date-range" class="date-range"></p><button id="next-period" aria-label="다음 기간">${icon('chevron')}</button></div>
       <div id="inline-summary" class="inline-summary"><div><p id="inline-summary-title" class="eyebrow"></p><p class="inline-summary-value"><span id="inline-summary-value"></span><span class="unit">°C</span></p></div><button id="clear-inline-selection" class="clear-selection" hidden>선택 해제</button></div><div id="inline-chart" class="chart" tabindex="0" aria-label="온도 기록 그래프"></div><p id="inline-caption" class="inline-caption"></p></section>
@@ -167,15 +174,18 @@ function renderHome(){
 function updateReadings(){
   homeMonitor?.setSample(latest);
   if(tab!=='home')return;
+  const status=statusForReading(latest,activeEvent,settings),condition=$('#current-condition');
+  condition.style.setProperty('--status-color',status.color);condition.style.setProperty('--status-soft',status.soft);
+  condition.innerHTML=faceSVG(status);condition.setAttribute('aria-label',`현재 온도 상태: ${status.label}`);
   $('#current-temperature').textContent=fmt(selectedValue());
   $('#current-temperature').parentElement.setAttribute('aria-label',`${selected?'선택 지점':'현재 온도'} ${fmt(selectedValue())}도`);
   renderRecentTrend();
 }
 function renderRecentTrend(){
   const element=$('#mini-chart');if(tab!=='home'||!element)return;
-  const end=Date.now(),start=end-15*60000;
+  const end=Date.now(),start=end-6*3600000;
   const points=segmentedSamples(samples.filter(sample=>sample.date>=start&&sample.date<=end)).map(sample=>({...sample,v:selectedValue(sample)}));
-  element.setAttribute('aria-label',`최근 15분 ${selected?'선택 지점':'대표 온도'} 흐름`);
+  element.setAttribute('aria-label',`최근 6시간 ${selected?'선택 지점':'대표 온도'} 흐름`);
   renderMiniChart(element,points,{start,end});
 }
 function eventCard(event){const status=severityForEvent(event);return `<button class="event-card" data-event="${event.id}" style="--status-color:${status.color};--status-soft:${status.soft}"><span class="event-glyph">${icon(event.kind==='connection'?'wifi':'thermometer')}</span><span class="event-copy"><span class="event-heading"><h3>${eventLabel(event)}</h3><span class="status-label">${status.label}</span></span><p>${eventDescription(event)}</p><time>${fullDate(event.date)}</time></span><span class="event-status${!event.resolved?' active':''}">${event.resolved?'종료':event.ack?'확인함':'확인 필요'}</span></button>`;}
@@ -205,6 +215,7 @@ function renderSettings(){
 }
 function thresholdRow(field,title){return `<div class="threshold-row"><span class="row-title">${title}</span><button data-field="${field}" data-step="-0.1" aria-label="${title} 낮추기">${icon('minus')}</button><output id="threshold-${field}" aria-label="${title}">${fmt(draft[field])}°</output><button data-field="${field}" data-step="0.1" aria-label="${title} 높이기">${icon('plus')}</button></div>`;}
 function setTab(value){
+  clearPointRestoreTimer();selected=null;tracking.selection=null;history.selection=null;
   homeMonitor?.destroy();homeMonitor=null;tab=value;
   $$('[data-tab]').forEach(button=>{if(button.dataset.tab===tab)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
   if(tab==='home')renderHome();if(tab==='events')renderEvents();if(tab==='settings')renderSettings();
@@ -213,6 +224,7 @@ function setTab(value){
 $$('[data-tab]').forEach(button=>button.onclick=()=>setTab(button.dataset.tab));
 function switchMode(value){
   if(!['steady','fever'].includes(value))return;
+  clearPointRestoreTimer();
   if(alertDialog.open)alertDialog.close();if(sheet.open)sheet.close();
   sheetKind=null;sheetStack=[];eventId=null;
   popup=null;activeEvent=null;queued=[];shown=new Set();liveSamples=[];selected=null;
